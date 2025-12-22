@@ -2,7 +2,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, HTTPException
 from langchain_core.messages import HumanMessage
-from sqlmodel import select
+from sqlmodel import col, select
 
 from app.core.agent import OutputSchema, agent
 from app.db import SessionDep
@@ -11,7 +11,6 @@ from app.models import (
     Feedback,
     FeedbackRequest,
     Interaction,
-    InteractionDocument,
     MessageRequest,
     MessageResponse,
 )
@@ -42,44 +41,28 @@ async def message(msg: MessageRequest, db: SessionDep):
     end_time = datetime.now()
     response_time = (end_time - start_time).total_seconds()
 
-    # Create the interaction record
+    # Track which documents were used based on agent's response
+    used_documents = db.exec(
+        select(Document).where(
+            col(Document.filename).in_(agent_response.used_documents)
+        )
+    ).all()
+
     interaction = Interaction(
         question=msg.question,
         answer=agent_response.answer,
         response_time=response_time,
+        documents=used_documents,
+        timestamp=None,
     )
     db.add(interaction)
     db.commit()
     db.refresh(interaction)
 
-    # Track which documents were used based on agent's response
-    used_document_filenames = []
-    if agent_response.used_documents:
-        for idx, doc_filename in enumerate(agent_response.used_documents, start=1):
-            # Find the document in the database by filename
-            statement = select(Document).where(Document.filename == doc_filename)
-            document = db.exec(statement).first()
-
-            if document:
-                interaction_doc = InteractionDocument(
-                    interaction_id=interaction.id,
-                    document_id=document.id,
-                    usage_order=idx,  # Track the order in which documents were used
-                )
-                db.add(interaction_doc)
-                used_document_filenames.append(doc_filename)
-            else:
-                # Log warning if agent references a document that doesn't exist in DB
-                print(
-                    f"Warning: Agent referenced document '{doc_filename}' which is not in the database"
-                )
-
-        db.commit()
-
     return MessageResponse(
         answer=agent_response.answer,
         interaction_id=interaction.id,
-        source_documents=used_document_filenames,
+        source_documents=used_documents,
     )
 
 
@@ -92,10 +75,7 @@ async def submit_feedback(feedback_req: FeedbackRequest, db: SessionDep):
     if not interaction:
         raise HTTPException(status_code=404, detail="Interaction not found.")
 
-    # Check if feedback already exists for this interaction
-    existing_feedback = db.exec(
-        select(Feedback).where(Feedback.interaction_id == feedback_req.interaction_id)
-    ).first()
+    existing_feedback = interaction.feedback
 
     if existing_feedback:
         # Update existing feedback

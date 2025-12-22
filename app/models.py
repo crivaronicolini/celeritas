@@ -1,8 +1,25 @@
 from datetime import datetime
 from typing import List, Optional, Dict
 
-from fastapi import UploadFile
 from sqlmodel import TIMESTAMP, Column, Field, Relationship, SQLModel, text
+
+
+class InteractionDocument(SQLModel, table=True):
+    """
+    Junction table to track which documents were used in each interaction.
+    This allows multiple documents to be associated with a single interaction.
+    """
+
+    interaction_id: int = Field(foreign_key="interaction.id", primary_key=True)
+    document_id: int = Field(foreign_key="document.id", primary_key=True)
+
+    # # Track the relevance or order in which documents were used
+    # relevance_score: float | None = None
+    # usage_order: int | None = None
+
+    # # Relationships
+    # interaction: "Interaction" = Relationship(back_populates="documents")
+    # document: "Document" = Relationship(back_populates="interactions")
 
 
 # Document Models
@@ -19,9 +36,8 @@ class Document(DocumentBase, table=True):
             server_default=text("CURRENT_TIMESTAMP"),
         )
     )
-    # Relationship through junction table
-    interaction_links: List["InteractionDocument"] = Relationship(
-        back_populates="document"
+    interactions: List["Interaction"] = Relationship(
+        back_populates="documents", link_model=InteractionDocument
     )
 
 
@@ -73,8 +89,8 @@ class Interaction(InteractionBase, table=True):
     response_time: float
 
     # Relationships
-    document_links: List["InteractionDocument"] = Relationship(
-        back_populates="interaction"
+    documents: List["Document"] = Relationship(
+        back_populates="interactions", link_model=InteractionDocument
     )
     feedback: Optional["Feedback"] = Relationship(back_populates="interaction")
 
@@ -95,24 +111,6 @@ class InteractionPublic(InteractionBase):
     used_documents: List[str] = Field(default_factory=list)
 
 
-class InteractionDocument(SQLModel, table=True):
-    """
-    Junction table to track which documents were used in each interaction.
-    This allows multiple documents to be associated with a single interaction.
-    """
-
-    interaction_id: int = Field(foreign_key="interaction.id", primary_key=True)
-    document_id: int = Field(foreign_key="document.id", primary_key=True)
-
-    # Track the relevance or order in which documents were used
-    relevance_score: float | None = None
-    usage_order: int | None = None
-
-    # Relationships
-    interaction: Interaction = Relationship(back_populates="document_links")
-    document: Document = Relationship(back_populates="interaction_links")
-
-
 # API Specific Models (not directly tied to a table)
 class MessageRequest(SQLModel):
     question: str
@@ -120,8 +118,8 @@ class MessageRequest(SQLModel):
 
 class MessageResponse(SQLModel):
     answer: str
-    interaction_id: int
-    source_documents: List[str] = Field(default_factory=list)
+    interaction_id: int | None
+    source_documents: List[DocumentPublic]
 
 
 class UploadResponse(SQLModel):

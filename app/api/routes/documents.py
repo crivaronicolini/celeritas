@@ -14,6 +14,11 @@ from app.models import Document, DocumentPublic, UploadResponse
 router = APIRouter(tags=["documents"])
 
 
+@router.get("/")
+def list_documents(db: SessionDep):
+    return db.exec(select(Document)).all()
+
+
 @router.post("/", response_model=UploadResponse)
 async def upload_documents(db: SessionDep, files: List[UploadFile] = File(...)):
     """

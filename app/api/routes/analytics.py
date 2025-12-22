@@ -1,8 +1,9 @@
 from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException
+from sqlalchemy.orm import selectinload, with_parent
 from sqlmodel import func, select, col
 from app.db import SessionDep
-from app.models import Document, Interaction, InteractionDocument, Feedback
+from app.models import Document, Interaction, Feedback
 from typing import List, Dict, Any
 
 router = APIRouter(tags=["analytics"])
@@ -20,11 +21,12 @@ async def get_analytics(db: SessionDep) -> Dict[str, Any]:
     document_query_counts = db.exec(
         select(
             Document.filename,
-            func.count(col(InteractionDocument.interaction_id)).label("query_count"),
+            query_count := func.count(Interaction.id),
         )
-        .join(InteractionDocument)
+        .select_from(Document)
+        .join(Document.interactions)
         .group_by(Document.filename)
-        .order_by(func.count(col(InteractionDocument.interaction_id)).desc())
+        .order_by(query_count.desc())
     ).all()
 
     analytics_data["most_frequently_queried_documents"] = [
@@ -34,9 +36,9 @@ async def get_analytics(db: SessionDep) -> Dict[str, Any]:
 
     # 2. What questions are asked most often?
     question_counts = db.exec(
-        select(Interaction.question, func.count(Interaction.id).label("ask_count"))
+        select(Interaction.question, ask_count := func.count(Interaction.id))
         .group_by(Interaction.question)
-        .order_by(func.count(Interaction.id).desc())
+        .order_by(ask_count.desc())
         .limit(20)
     ).all()
 
@@ -49,13 +51,13 @@ async def get_analytics(db: SessionDep) -> Dict[str, Any]:
     weekly_query_counts = db.exec(
         select(
             Document.filename,
-            func.count(InteractionDocument.interaction_id).label("weekly_query_count"),
+            weekly_query_count := func.count(Interaction.id),
         )
-        .join(InteractionDocument)
-        .join(Interaction)
+        .select_from(Document)
+        .join(Document.interactions)
         .where(Interaction.timestamp >= seven_days_ago)
         .group_by(Document.filename)
-        .order_by(func.count(InteractionDocument.interaction_id).desc())
+        .order_by(weekly_query_count.desc())
     ).all()
 
     analytics_data["weekly_queries_per_document"] = [
@@ -73,13 +75,16 @@ async def get_analytics(db: SessionDep) -> Dict[str, Any]:
     )
 
     # 5. Feedback statistics
-    total_feedback = db.exec(select(func.count(Feedback.id))).one() or 0
-    positive_feedback = (
-        db.exec(
-            select(func.count(Feedback.id)).where(Feedback.is_positive == True)
-        ).one()
-        or 0
-    )
+    feedbacks = db.exec(
+        select(
+            func.count(col(Feedback.id)).label("total_feedback"),
+            func.count(col(Feedback.id))
+            .filter(col(Feedback.is_positive))
+            .label("positive_feedback"),
+        )
+    ).one()
+    total_feedback = feedbacks.total_feedback
+    positive_feedback = feedbacks.positive_feedback
 
     analytics_data["feedback_statistics"] = {
         "total_feedback_count": total_feedback,
@@ -108,24 +113,11 @@ async def get_document_analytics(document_id: int, db: SessionDep) -> Dict[str, 
     if not document:
         raise HTTPException(status_code=404, detail="Document not found.")
 
-    # Get all interactions that used this document
-    interactions_count = (
-        db.exec(
-            select(func.count(InteractionDocument.interaction_id)).where(
-                InteractionDocument.document_id == document_id
-            )
-        ).one()
-        or 0
-    )
-
     # Get recent questions that used this document
-    recent_interactions = db.exec(
-        select(Interaction)
-        .join(InteractionDocument)
-        .where(InteractionDocument.document_id == document_id)
-        .order_by(Interaction.timestamp.desc())
-        .limit(10)
-    ).all()
+    doc_interactions = document.interactions
+
+    # Get all interactions that used this document
+    interactions_count = len(doc_interactions)
 
     recent_questions = [
         {
@@ -133,14 +125,14 @@ async def get_document_analytics(document_id: int, db: SessionDep) -> Dict[str, 
             "timestamp": interaction.timestamp,
             "response_time": interaction.response_time,
         }
-        for interaction in recent_interactions
+        for interaction in doc_interactions
     ]
 
     # Average response time for queries using this document
     avg_response_time = db.exec(
         select(func.avg(Interaction.response_time))
-        .join(InteractionDocument)
-        .where(InteractionDocument.document_id == document_id)
+        .select_from(Interaction)
+        .where(with_parent(document, Document.interactions))
     ).one_or_none()
 
     return {
@@ -163,18 +155,15 @@ async def get_recent_interactions(
     Get the most recent interactions with their associated documents.
     """
     interactions = db.exec(
-        select(Interaction).order_by(Interaction.timestamp.desc()).limit(limit)
+        select(Interaction)
+        .options(selectinload(Interaction.documents))
+        .order_by(col(Interaction.timestamp).desc())
+        .limit(limit)
     ).all()
 
     result = []
     for interaction in interactions:
-        # Get documents used in this interaction
-        documents = db.exec(
-            select(Document)
-            .join(InteractionDocument)
-            .where(InteractionDocument.interaction_id == interaction.id)
-            .order_by(InteractionDocument.usage_order)
-        ).all()
+        documents = interaction.documents
 
         result.append(
             {
@@ -197,11 +186,10 @@ async def get_unused_documents(db: SessionDep) -> List[Dict[str, Any]]:
     """
     Find documents that have been uploaded but never used in any interaction.
     """
+
     # Get all documents that don't have any entries in InteractionDocument
     unused_documents = db.exec(
-        select(Document)
-        .outerjoin(InteractionDocument)
-        .where(InteractionDocument.document_id == None)
+        select(Document).where(~col(Document.interactions).any())
     ).all()
 
     return [
@@ -223,9 +211,8 @@ async def get_unanswered_patterns(db: SessionDep) -> Dict[str, Any]:
     # Questions where no documents were used (agent couldn't find relevant info)
     questions_without_docs = db.exec(
         select(Interaction)
-        .outerjoin(InteractionDocument)
-        .where(InteractionDocument.interaction_id == None)
-        .order_by(Interaction.timestamp.desc())
+        .where(~col(Interaction.documents).any())
+        .order_by(col(Interaction.timestamp).desc())
         .limit(20)
     ).all()
 
@@ -233,8 +220,8 @@ async def get_unanswered_patterns(db: SessionDep) -> Dict[str, Any]:
     questions_with_negative_feedback = db.exec(
         select(Interaction)
         .join(Feedback)
-        .where(Feedback.is_positive == False)
-        .order_by(Interaction.timestamp.desc())
+        .where(~col(Feedback.is_positive))
+        .order_by(col(Interaction.timestamp).desc())
         .limit(20)
     ).all()
 
