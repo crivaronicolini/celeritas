@@ -18,9 +18,10 @@ class Settings(BaseSettings):
     VECTOR_DB_PATH: str
     DOC_DIR_PATH: str
     DATABASE_URL: str
-    OPENAI_API_KEY: SecretStr
+    OPENAI_API_KEY: SecretStr | None
     LANGSMITH_API_KEY: SecretStr
     LANGSMITH_TRACING: bool = True
+    GEMINI_API_KEY: SecretStr | None
 
 
 settings = Settings()  # type: ignore

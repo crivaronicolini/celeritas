@@ -1,10 +1,9 @@
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException
-from langchain_core.messages import HumanMessage
 from sqlmodel import col, select
 
-from app.core.agent import OutputSchema, agent
+from app.core.agent import AgentDep
 from app.db import SessionDep
 from app.models import (
     Document,
@@ -19,7 +18,7 @@ router = APIRouter(tags=["chat"])
 
 
 @router.post("/message", response_model=MessageResponse)
-async def message(msg: MessageRequest, db: SessionDep):
+async def message(msg: MessageRequest, db: SessionDep, agent: AgentDep):
     """
     Accepts a natural language question and returns an answer based on documents
     retrieved by the agent. Tracks which documents were actually used.
@@ -29,10 +28,8 @@ async def message(msg: MessageRequest, db: SessionDep):
 
     # Invoke the agent with the question
     try:
-        agent_response: OutputSchema = (
-            await agent.ainvoke({"messages": [HumanMessage(content=msg.question)]})
-        )["structured_response"]
-        # TODO: better handling of errors
+        agent_response = await agent.ainvoke(msg.question)
+    # TODO: better handling of errors
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Agent failed to process query: {e}"

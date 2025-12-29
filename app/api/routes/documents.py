@@ -7,11 +7,21 @@ from fastapi import APIRouter, File, UploadFile
 from sqlmodel import select
 
 from app.core.config import settings
-from app.core.document import process_pdf
+from app.core.document import vector_store
 from app.db import SessionDep
 from app.models import Document, DocumentPublic, UploadResponse
 
 router = APIRouter(tags=["documents"])
+
+
+@router.delete("/", response_model=list[DocumentPublic])
+def delete_all_docs(db: SessionDep):
+    all_docs = db.exec(select(Document)).all()
+    for doc in all_docs:
+        db.delete(doc)
+    db.commit()
+    vector_store.delete_all_docs()
+    return all_docs
 
 
 @router.get("/")
@@ -78,7 +88,7 @@ async def upload_documents(db: SessionDep, files: List[UploadFile] = File(...)):
     # --- Asynchronous Embedding Calculation ---
     processing_tasks = []
     for db_document, file_path in valid_files_to_process:
-        processing_tasks.append(process_pdf(file_path))
+        processing_tasks.append(vector_store.process_pdf(file_path))
 
     results = await asyncio.gather(*processing_tasks, return_exceptions=True)
 
