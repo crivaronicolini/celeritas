@@ -9,7 +9,7 @@ from app.core.auth import CurrentSuperuser
 from app.db import SessionDep
 from app.models import Document, Feedback, Interaction
 
-router = APIRouter(tags=["analytics"])
+router = APIRouter()
 
 
 @router.get("/")

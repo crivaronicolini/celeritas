@@ -16,7 +16,7 @@ from app.models import (
     ConversationPublic,
 )
 
-router = APIRouter(tags=["conversations"])
+router = APIRouter()
 
 
 @router.get("/", response_model=ConversationList)

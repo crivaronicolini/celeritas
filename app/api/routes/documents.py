@@ -11,7 +11,7 @@ from app.core.document import vector_store
 from app.db import SessionDep
 from app.models import Document, DocumentPublic, UploadResponse
 
-router = APIRouter(tags=["documents"])
+router = APIRouter()
 
 
 @router.delete("/", response_model=list[DocumentPublic])

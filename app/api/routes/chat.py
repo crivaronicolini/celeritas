@@ -16,7 +16,7 @@ from app.models import (
     MessageResponse,
 )
 
-router = APIRouter(tags=["chat"])
+router = APIRouter()
 
 
 @router.post("/message/{conversation_id}", response_model=MessageResponse)
