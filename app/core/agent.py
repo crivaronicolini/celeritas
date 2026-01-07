@@ -1,12 +1,14 @@
+from contextlib import asynccontextmanager
 from typing import Annotated, Callable, List
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from langchain.agents import create_agent
 from langchain.tools import tool
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
@@ -18,11 +20,6 @@ class RetrieveContextArgsSchema(BaseModel):
 
 
 class OutputSchema(BaseModel):
-    """
-    Schema for agent output that includes both the answer and
-    the list of documents that were used to generate the answer.
-    """
-
     answer: str = Field(description="The answer to the user's question")
     used_documents: List[str] = Field(
         description="List of document filenames that were used to answer the question. "
@@ -35,6 +32,7 @@ class RAGAgent:
         self,
         model: BaseChatModel | Callable | None = None,
         tools: list[Callable] | None = None,
+        checkpointer: AsyncSqliteSaver | None = None,
     ):
         self.sys_prompt = """You are a helpful RAG assistant that answers questions grounding your knowledge on the document database.
 
@@ -53,14 +51,16 @@ class RAGAgent:
         This tracking is critical for analytics and citation purposes."""
 
         self.model: BaseChatModel = model or ChatOpenAI(
-            model="gpt-5-nano", api_key=settings.OPENAI_API_KEY
+            model="gpt-4o-mini", api_key=settings.OPENAI_API_KEY
         )
         self.tools = tools or [self.retrieve_context]
+        self.checkpointer = checkpointer
         self.agent = create_agent(
             self.model,
             self.tools,
             system_prompt=self.sys_prompt,
             response_format=OutputSchema,
+            checkpointer=self.checkpointer,
         )
 
     @staticmethod
@@ -82,7 +82,6 @@ class RAGAgent:
 
         serialized_docs: list[str] = []
         for doc in retrieved_docs:
-            # Extract just the filename from the 'source' metadata
             source_filename: str = doc.metadata.get("source", "unknown").split("/")[-1]
             serialized_docs.append(
                 f"Source: {source_filename}\nContent: {doc.page_content}"
@@ -90,23 +89,40 @@ class RAGAgent:
 
         return "\n\n".join(serialized_docs)
 
-    async def ainvoke(self, question: str) -> OutputSchema:
+    async def ainvoke(self, question: str, thread_id: str) -> OutputSchema:
+        config = {"configurable": {"thread_id": thread_id}}
         response = await self.agent.ainvoke(
-            {"messages": [HumanMessage(content=question)]}
+            {"messages": [HumanMessage(content=question)]},
+            config=config,
         )
-
         return response["structured_response"]
 
+    async def get_history(self, thread_id: str) -> list:
+        if not self.checkpointer:
+            return []
+        config = {"configurable": {"thread_id": thread_id}}
+        state = await self.agent.aget_state(config)
+        if state and state.values:
+            return state.values.get("messages", [])
+        return []
 
-agent = RAGAgent(
-    model=ChatGoogleGenerativeAI(
-        model="gemini-flash-latest", api_key=settings.GEMINI_API_KEY
-    )
-)
+
+@asynccontextmanager
+async def lifespan_agent(app):
+    """Context manager for agent lifecycle. Use in FastAPI lifespan."""
+    checkpointer_path = settings.DATABASE_URL.replace("sqlite+aiosqlite:///", "")
+    async with AsyncSqliteSaver.from_conn_string(checkpointer_path) as checkpointer:
+        app.state.agent = RAGAgent(
+            model=ChatGoogleGenerativeAI(
+                model="gemini-2.0-flash", api_key=settings.GEMINI_API_KEY
+            ),
+            checkpointer=checkpointer,
+        )
+        yield
 
 
-def get_agent():
-    return agent
+def get_agent(request: Request) -> RAGAgent:
+    return request.app.state.agent
 
 
 AgentDep = Annotated[RAGAgent, Depends(get_agent)]

@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
+from app.core.agent import lifespan_agent
 from app.core.config import settings
 from app.db import create_db_and_tables, engine
 
@@ -11,6 +12,8 @@ from app.db import create_db_and_tables, engine
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await create_db_and_tables()
+    async with lifespan_agent(app):
+        yield
     await engine.dispose()
 
 
