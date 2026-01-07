@@ -73,11 +73,9 @@ async def message(
     )
 
 
-@router.post("/feedback")
+@router.put("/feedback")
 async def submit_feedback(
-    feedback_req: FeedbackRequest,
-    db: SessionDep,
-    user: CurrentUser,
+    feedback_req: FeedbackRequest, db: SessionDep, user: CurrentUser
 ):
     """
     Submits user feedback (thumbs up/down) for a specific interaction.
@@ -93,7 +91,7 @@ async def submit_feedback(
         db.add(existing_feedback)
         await db.commit()
         await db.refresh(existing_feedback)
-        return {"message": "Feedback updated successfully."}
+        return Response(status.HTTP_200_OK)
     else:
         new_feedback = Feedback(
             interaction_id=feedback_req.interaction_id,
@@ -102,4 +100,4 @@ async def submit_feedback(
         db.add(new_feedback)
         await db.commit()
         await db.refresh(new_feedback)
-        return {"message": "Feedback submitted successfully."}
+        return Response(status.HTTP_201_CREATED)
