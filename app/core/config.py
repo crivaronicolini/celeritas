@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str
 
     LANGSMITH_API_KEY: SecretStr
-    LANGSMITH_TRACING: bool = True
+    LANGSMITH_TRACING: bool = False
 
     OPENAI_API_KEY: SecretStr | None
     GEMINI_API_KEY: SecretStr | None
@@ -34,6 +34,10 @@ class Settings(BaseSettings):
 
     # Frontend URL for CORS
     FRONTEND_URL: str = "http://localhost:5173"
+
+    # Logging settings
+    LOG_SAMPLE_RATE: float = 0.1
+    LOG_SLOW_THRESHOLD_MS: int = 1000  # Slow request threshold in ms
 
 
 settings = Settings()  # type: ignore

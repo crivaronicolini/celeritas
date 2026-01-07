@@ -1,4 +1,3 @@
-import logging.config
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -8,9 +7,10 @@ from app.api.router import api_router
 from app.core.agent import lifespan_agent
 from app.core.config import settings
 from app.db import create_db_and_tables, engine
-from app.logging_conf import LOGGING_CONFIG
+from app.logging_conf import configure_logging
+from app.middleware.wide_logging import WideLoggingMiddleware
 
-logging.config.dictConfig(LOGGING_CONFIG)
+configure_logging()
 
 
 @asynccontextmanager
@@ -34,5 +34,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(WideLoggingMiddleware)
 
 app.include_router(api_router, prefix=settings.API_V1_STR)

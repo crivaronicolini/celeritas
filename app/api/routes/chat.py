@@ -1,7 +1,9 @@
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException
+import structlog
+from fastapi import APIRouter, HTTPException, Response, status
 from sqlalchemy import select
+from structlog.contextvars import bind_contextvars
 
 from app.core.agent import AgentDep
 from app.core.auth import CurrentUser
@@ -15,6 +17,8 @@ from app.models import (
     MessageRequest,
     MessageResponse,
 )
+
+logger = structlog.stdlib.get_logger(__name__)
 
 router = APIRouter()
 
@@ -31,15 +35,32 @@ async def message(
     Accepts a natural language question and returns an answer based on documents
     retrieved by the agent. Tracks which documents were actually used.
     """
+    bind_contextvars(
+        user_id=str(user.id),
+        conversation_id=conversation_id,
+        question_length=len(msg.question),
+    )
+    logger.debug("message endpoint called", question=msg.question[:100])
+
     conversation = await db.get(Conversation, conversation_id)
+    logger.debug("conversation lookup", found=conversation is not None)
+
     if not conversation or conversation.user_id != user.id:
+        bind_contextvars(access_denied=True)
+        logger.debug("conversation not found or unauthorized")
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     start_time = datetime.now()
 
     try:
+        logger.debug("invoking agent", question=msg.question[:100])
         agent_response = await agent.ainvoke(msg.question, thread_id=conversation_id)
+        logger.debug(
+            "agent response received", answer_length=len(agent_response.answer)
+        )
     except Exception as e:
+        bind_contextvars(error_type=type(e).__name__, error_message=str(e))
+        logger.debug("agent failed to process query", error=str(e))
         raise HTTPException(
             status_code=500, detail=f"Agent failed to process query: {e}"
         )
@@ -65,6 +86,12 @@ async def message(
     db.add(interaction)
     await db.commit()
     await db.refresh(interaction)
+
+    bind_contextvars(
+        response_time_ms=round(response_time * 1000, 2),
+        documents_used=[d.filename for d in used_documents],
+        interaction_id=str(interaction.id),
+    )
 
     return MessageResponse(
         answer=agent_response.answer,

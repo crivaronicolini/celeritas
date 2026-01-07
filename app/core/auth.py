@@ -9,6 +9,7 @@ from fastapi_users.authentication import (
     JWTStrategy,
 )
 from httpx_oauth.clients.google import GoogleOAuth2
+from structlog.contextvars import bind_contextvars
 
 from app.core.config import settings
 from app.db import get_user_db
@@ -34,7 +35,7 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
     verification_token_secret = settings.SECRET_KEY
 
     async def on_after_register(self, user: User, request: Request | None = None):
-        print(f"User {user.id} has registered.")
+        bind_contextvars(user_id=str(user.id), auth_event="register")
 
     async def on_after_login(
         self,
@@ -42,7 +43,7 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
         request: Request | None = None,
         response=None,
     ):
-        print(f"User {user.id} logged in.")
+        bind_contextvars(user_id=str(user.id), auth_event="login")
 
 
 async def get_user_manager(user_db=Depends(get_user_db)):

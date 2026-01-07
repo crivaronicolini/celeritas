@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 from typing import Annotated, Callable, List
 
+import structlog
 from fastapi import Depends, Request
 from langchain.agents import create_agent
 from langchain.tools import tool
@@ -10,9 +11,12 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from pydantic import BaseModel, Field
+from structlog.contextvars import bind_contextvars
 
 from app.core.config import settings
 from app.core.document import vector_store
+
+logger = structlog.stdlib.get_logger(__name__)
 
 
 class RetrieveContextArgsSchema(BaseModel):
@@ -74,28 +78,64 @@ class RAGAgent:
             information: str
                 The found documents with their source filenames that will help answer the query.
         """
+        logger.debug("retrieve_context called", query=query[:100])
+        bind_contextvars(rag_query=query[:100])
 
         if vector_store.is_empty:
+            logger.debug("vector store is empty")
+            bind_contextvars(vector_store_empty=True)
             return "The document vector store is currently empty. Notify the user and suggest to upload documents."
 
+        logger.debug("performing similarity search")
         retrieved_docs = vector_store.similarity_search(query, k=4)
+        logger.debug("retrieved documents", count=len(retrieved_docs))
 
+        sources: list[str] = []
         serialized_docs: list[str] = []
         for doc in retrieved_docs:
             source_filename: str = doc.metadata.get("source", "unknown").split("/")[-1]
+            sources.append(source_filename)
+            logger.debug(
+                "document retrieved",
+                source=source_filename,
+                preview=doc.page_content[:100],
+            )
             serialized_docs.append(
                 f"Source: {source_filename}\nContent: {doc.page_content}"
             )
 
+        bind_contextvars(
+            documents_retrieved=len(retrieved_docs), document_sources=sources
+        )
         return "\n\n".join(serialized_docs)
 
     async def ainvoke(self, question: str, thread_id: str) -> OutputSchema:
+        logger.debug("ainvoke called", thread_id=thread_id, question=question[:100])
         config = {"configurable": {"thread_id": thread_id}}
-        response = await self.agent.ainvoke(
-            {"messages": [HumanMessage(content=question)]},
-            config=config,
-        )
-        return response["structured_response"]
+        logger.debug("agent config", config=config)
+        try:
+            response = await self.agent.ainvoke(
+                {"messages": [HumanMessage(content=question)]},
+                config=config,
+            )
+            logger.debug(
+                "raw agent response", keys=list(response.keys()) if response else None
+            )
+            structured = response["structured_response"]
+            logger.debug(
+                "structured_response received", answer_length=len(structured.answer)
+            )
+            return structured
+        except KeyError as e:
+            bind_contextvars(
+                error_type="KeyError", error_message="Missing key in agent response"
+            )
+            logger.debug("missing key in agent response", error=str(e))
+            raise
+        except Exception as e:
+            bind_contextvars(error_type=type(e).__name__, error_message=str(e))
+            logger.debug("agent invocation failed", error=str(e))
+            raise
 
     async def get_history(self, thread_id: str) -> list:
         if not self.checkpointer:
@@ -118,6 +158,7 @@ async def lifespan_agent(app):
             ),
             checkpointer=checkpointer,
         )
+        logger.debug("agent initialized", agent=repr(app.state.agent))
         yield
 
 
