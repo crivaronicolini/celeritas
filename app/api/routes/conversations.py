@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+import structlog
 from fastapi import APIRouter, HTTPException
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from sqlalchemy import select
@@ -16,7 +17,25 @@ from app.models import (
     ConversationPublic,
 )
 
+logger = structlog.stdlib.get_logger(__name__)
+
 router = APIRouter()
+
+
+def _extract_ai_content(msg: AIMessage) -> str | None:
+    """Extract text content from AIMessage, handling structured output formats."""
+    # Direct text content
+    if msg.text:
+        return msg.text
+
+    # Structured output: extract answer from tool_call blocks
+    for block in msg.content_blocks:
+        if block.get("type") == "tool_call":
+            args = block.get("args", {})
+            if isinstance(args, dict) and "answer" in args:
+                return args["answer"]
+
+    return None
 
 
 @router.get("/", response_model=ConversationList)
@@ -104,8 +123,9 @@ async def get_conversation_messages(
         if isinstance(msg, HumanMessage):
             result.append({"role": "user", "content": msg.content})
         elif isinstance(msg, AIMessage):
-            if msg.content:
-                result.append({"role": "assistant", "content": msg.content})
+            content = _extract_ai_content(msg)
+            if content:
+                result.append({"role": "assistant", "content": content})
         elif isinstance(msg, ToolMessage):
             continue
 

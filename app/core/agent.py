@@ -38,15 +38,17 @@ class RAGAgent:
         tools: list[Callable] | None = None,
         checkpointer: AsyncSqliteSaver | None = None,
     ):
-        self.sys_prompt = """You are a helpful RAG assistant that answers questions grounding your knowledge on the document database.
+        self.sys_prompt = """You are a helpful RAG assistant.
+        You can engage in casual conversation and also use your retrieval tool to augment the information you have.
+        For every message from the user you must think and decide if it part of a normal conversation or if it is relevant to the users stored documents.
+        If you find that is relevant to the documents, you must user your retrieval tool.
 
         IMPORTANT INSTRUCTIONS:
-        1. Always use the retrieve_context tool to search for relevant information
-        2. Prioritize the information from the retrieved documents in your answer
-        3. Pay attention to the 'Source:' field in the retrieved context - these indicate which documents you used
-        4. In your response, you MUST populate the 'used_documents' field with ALL unique document filenames that appear in the 'Source:' fields of the context you retrieved
-        5. Extract ONLY the filename from each Source field (e.g., if you see "Source: climate_report.pdf", add "climate_report.pdf" to used_documents)
-        6. If no relevant information is found in the database, inform the user and answer to the best of your ability with your general knowledge, but leave used_documents as an empty list
+        1. Prioritize the information from the retrieved documents in your answer
+        2. Pay attention to the 'Source:' field in the retrieved context - these indicate which documents you used
+        3. In your response, you MUST populate the 'used_documents' field with ALL unique document filenames that appear in the 'Source:' fields of the context you retrieved
+        4. Extract ONLY the filename from each Source field (e.g., if you see "Source: climate_report.pdf", add "climate_report.pdf" to used_documents)
+        5. If no relevant information is found in the database, inform the user and answer to the best of your ability with your general knowledge, but leave used_documents as an empty list
 
         Example of correct behavior:
         - You retrieve context with "Source: document1.pdf" and "Source: document2.pdf"
@@ -71,6 +73,8 @@ class RAGAgent:
     @tool(args_schema=RetrieveContextArgsSchema)
     def retrieve_context(query: str) -> str:
         """Retrieve information from the vector database to help answer a query.
+        Only use this tool to search information relevant to the query.
+        Do not use it to engage in casual conversation.
         Args:
             query:str
                 A query written by you to answer the user's query.
@@ -154,7 +158,7 @@ async def lifespan_agent(app):
     async with AsyncSqliteSaver.from_conn_string(checkpointer_path) as checkpointer:
         app.state.agent = RAGAgent(
             model=ChatGoogleGenerativeAI(
-                model="gemini-2.0-flash", api_key=settings.GEMINI_API_KEY
+                model="gemini-2.5-flash", api_key=settings.GEMINI_API_KEY
             ),
             checkpointer=checkpointer,
         )
