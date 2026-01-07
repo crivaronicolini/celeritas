@@ -1,22 +1,31 @@
-from collections.abc import Generator
-from typing import Annotated
+from typing import Annotated, AsyncGenerator
 
 from fastapi import Depends
-from sqlmodel import Session, SQLModel, create_engine
+from fastapi_users_db_sqlalchemy import SQLAlchemyUserDatabase
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import settings
+from app.models import Base, OAuthAccount, User
+
+engine = create_async_engine(
+    settings.DATABASE_URL, connect_args={"check_same_thread": False}
+)
+async_session_maker = async_sessionmaker(engine, expire_on_commit=False)
 
 
-engine = create_engine(settings.DATABASE_URL, connect_args={"check_same_thread": False})
+async def create_db_and_tables():
+    async with engine.begin() as conn:
+        # Base.metadata is shared with SQLModel.metadata in models.py
+        await conn.run_sync(Base.metadata.create_all)
 
 
-def create_db_and_tables():
-    SQLModel.metadata.create_all(engine)
-
-
-def get_db() -> Generator[Session, None, None]:
-    with Session(engine) as session:
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    async with async_session_maker() as session:
         yield session
 
 
-SessionDep = Annotated[Session, Depends(get_db)]
+SessionDep = Annotated[AsyncSession, Depends(get_db)]
+
+
+async def get_user_db(session: SessionDep):
+    yield SQLAlchemyUserDatabase(session, User, OAuthAccount)

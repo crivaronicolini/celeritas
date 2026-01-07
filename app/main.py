@@ -1,15 +1,16 @@
-from fastapi import FastAPI
 from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
 
 from app.api.main import api_router
 from app.core.config import settings
-from app.db import create_db_and_tables
+from app.db import create_db_and_tables, engine
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    create_db_and_tables()
-    yield
+    await create_db_and_tables()
+    await engine.dispose()
 
 
 app = FastAPI(

@@ -1,16 +1,19 @@
 from datetime import datetime, timedelta
+from typing import Any
+
 from fastapi import APIRouter, HTTPException
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload, with_parent
-from sqlmodel import func, select, col
+
+from app.core.auth import CurrentSuperuser
 from app.db import SessionDep
-from app.models import Document, Interaction, Feedback
-from typing import List, Dict, Any
+from app.models import Document, Feedback, Interaction
 
 router = APIRouter(tags=["analytics"])
 
 
 @router.get("/")
-async def get_analytics(db: SessionDep) -> Dict[str, Any]:
+async def get_analytics(db: SessionDep, admin: CurrentSuperuser) -> dict[str, Any]:
     """
     Provides comprehensive analytics on document usage and common questions.
     Now properly tracks multiple documents per interaction.
@@ -18,16 +21,15 @@ async def get_analytics(db: SessionDep) -> Dict[str, Any]:
     analytics_data = {}
 
     # 1. Which documents are queried most frequently?
-    document_query_counts = db.exec(
-        select(
-            Document.filename,
-            query_count := func.count(Interaction.id),
-        )
+    query_count = func.count(Interaction.id).label("query_count")
+    result = await db.execute(
+        select(Document.filename, query_count)
         .select_from(Document)
         .join(Document.interactions)
         .group_by(Document.filename)
         .order_by(query_count.desc())
-    ).all()
+    )
+    document_query_counts = result.all()
 
     analytics_data["most_frequently_queried_documents"] = [
         {"filename": doc_name, "query_count": count}
@@ -35,12 +37,14 @@ async def get_analytics(db: SessionDep) -> Dict[str, Any]:
     ]
 
     # 2. What questions are asked most often?
-    question_counts = db.exec(
-        select(Interaction.question, ask_count := func.count(Interaction.id))
+    ask_count = func.count(Interaction.id).label("ask_count")
+    result = await db.execute(
+        select(Interaction.question, ask_count)
         .group_by(Interaction.question)
         .order_by(ask_count.desc())
         .limit(20)
-    ).all()
+    )
+    question_counts = result.all()
 
     analytics_data["most_often_asked_questions"] = [
         {"question": q_text, "ask_count": count} for q_text, count in question_counts
@@ -48,17 +52,16 @@ async def get_analytics(db: SessionDep) -> Dict[str, Any]:
 
     # 3. How many queries were answered from each PDF this week?
     seven_days_ago = datetime.now() - timedelta(days=7)
-    weekly_query_counts = db.exec(
-        select(
-            Document.filename,
-            weekly_query_count := func.count(Interaction.id),
-        )
+    weekly_query_count = func.count(Interaction.id).label("weekly_query_count")
+    result = await db.execute(
+        select(Document.filename, weekly_query_count)
         .select_from(Document)
         .join(Document.interactions)
         .where(Interaction.timestamp >= seven_days_ago)
         .group_by(Document.filename)
         .order_by(weekly_query_count.desc())
-    ).all()
+    )
+    weekly_query_counts = result.all()
 
     analytics_data["weekly_queries_per_document"] = [
         {"filename": doc_name, "weekly_query_count": count}
@@ -66,23 +69,23 @@ async def get_analytics(db: SessionDep) -> Dict[str, Any]:
     ]
 
     # 4. Average response time
-    avg_response_time = db.exec(
-        select(func.avg(Interaction.response_time))
-    ).one_or_none()
+    result = await db.execute(select(func.avg(Interaction.response_time)))
+    avg_response_time = result.scalar_one_or_none()
 
     analytics_data["average_response_time_seconds"] = (
         round(avg_response_time, 3) if avg_response_time else 0
     )
 
     # 5. Feedback statistics
-    feedbacks = db.exec(
+    result = await db.execute(
         select(
-            func.count(col(Feedback.id)).label("total_feedback"),
-            func.count(col(Feedback.id))
-            .filter(col(Feedback.is_positive))
+            func.count(Feedback.id).label("total_feedback"),
+            func.count(Feedback.id)
+            .filter(Feedback.is_positive)
             .label("positive_feedback"),
         )
-    ).one()
+    )
+    feedbacks = result.one()
     total_feedback = feedbacks.total_feedback
     positive_feedback = feedbacks.positive_feedback
 
@@ -98,18 +101,21 @@ async def get_analytics(db: SessionDep) -> Dict[str, Any]:
     }
 
     # 6. Total interactions count
-    total_interactions = db.exec(select(func.count(Interaction.id))).one() or 0
+    result = await db.execute(select(func.count(Interaction.id)))
+    total_interactions = result.scalar_one() or 0
     analytics_data["total_interactions"] = total_interactions
 
     return analytics_data
 
 
 @router.get("/document/{document_id}")
-async def get_document_analytics(document_id: int, db: SessionDep) -> Dict[str, Any]:
+async def get_document_analytics(
+    document_id: int, db: SessionDep, admin: CurrentSuperuser
+) -> dict[str, Any]:
     """
     Get detailed analytics for a specific document.
     """
-    document = db.get(Document, document_id)
+    document = await db.get(Document, document_id)
     if not document:
         raise HTTPException(status_code=404, detail="Document not found.")
 
@@ -129,11 +135,12 @@ async def get_document_analytics(document_id: int, db: SessionDep) -> Dict[str, 
     ]
 
     # Average response time for queries using this document
-    avg_response_time = db.exec(
+    result = await db.execute(
         select(func.avg(Interaction.response_time))
         .select_from(Interaction)
         .where(with_parent(document, Document.interactions))
-    ).one_or_none()
+    )
+    avg_response_time = result.scalar_one_or_none()
 
     return {
         "document_id": document.id,
@@ -149,23 +156,24 @@ async def get_document_analytics(document_id: int, db: SessionDep) -> Dict[str, 
 
 @router.get("/interactions/recent")
 async def get_recent_interactions(
-    db: SessionDep, limit: int = 10
-) -> List[Dict[str, Any]]:
+    db: SessionDep, admin: CurrentSuperuser, limit: int = 10
+) -> list[dict[str, Any]]:
     """
     Get the most recent interactions with their associated documents.
     """
-    interactions = db.exec(
+    result = await db.execute(
         select(Interaction)
         .options(selectinload(Interaction.documents))
-        .order_by(col(Interaction.timestamp).desc())
+        .order_by(Interaction.timestamp.desc())
         .limit(limit)
-    ).all()
+    )
+    interactions = result.scalars().all()
 
-    result = []
+    output = []
     for interaction in interactions:
         documents = interaction.documents
 
-        result.append(
+        output.append(
             {
                 "id": interaction.id,
                 "question": interaction.question,
@@ -178,19 +186,19 @@ async def get_recent_interactions(
             }
         )
 
-    return result
+    return output
 
 
 @router.get("/documents/unused")
-async def get_unused_documents(db: SessionDep) -> List[Dict[str, Any]]:
+async def get_unused_documents(
+    db: SessionDep, admin: CurrentSuperuser
+) -> list[dict[str, Any]]:
     """
     Find documents that have been uploaded but never used in any interaction.
     """
-
     # Get all documents that don't have any entries in InteractionDocument
-    unused_documents = db.exec(
-        select(Document).where(~col(Document.interactions).any())
-    ).all()
+    result = await db.execute(select(Document).where(~Document.interactions.any()))
+    unused_documents = result.scalars().all()
 
     return [
         {
@@ -203,27 +211,31 @@ async def get_unused_documents(db: SessionDep) -> List[Dict[str, Any]]:
 
 
 @router.get("/questions/unanswered-patterns")
-async def get_unanswered_patterns(db: SessionDep) -> Dict[str, Any]:
+async def get_unanswered_patterns(
+    db: SessionDep, admin: CurrentSuperuser
+) -> dict[str, Any]:
     """
     Identify patterns in questions that might not have good answers.
     This looks at interactions with no documents used or negative feedback.
     """
     # Questions where no documents were used (agent couldn't find relevant info)
-    questions_without_docs = db.exec(
+    result = await db.execute(
         select(Interaction)
-        .where(~col(Interaction.documents).any())
-        .order_by(col(Interaction.timestamp).desc())
+        .where(~Interaction.documents.any())
+        .order_by(Interaction.timestamp.desc())
         .limit(20)
-    ).all()
+    )
+    questions_without_docs = result.scalars().all()
 
     # Questions with negative feedback
-    questions_with_negative_feedback = db.exec(
+    result = await db.execute(
         select(Interaction)
         .join(Feedback)
-        .where(~col(Feedback.is_positive))
-        .order_by(col(Interaction.timestamp).desc())
+        .where(~Feedback.is_positive)
+        .order_by(Interaction.timestamp.desc())
         .limit(20)
-    ).all()
+    )
+    questions_with_negative_feedback = result.scalars().all()
 
     return {
         "questions_without_documents": [

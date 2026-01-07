@@ -15,18 +15,20 @@ router = APIRouter(tags=["documents"])
 
 
 @router.delete("/", response_model=list[DocumentPublic])
-def delete_all_docs(db: SessionDep):
-    all_docs = db.exec(select(Document)).all()
+async def delete_all_docs(db: SessionDep):
+    result = await db.execute(select(Document))
+    all_docs = result.scalars().all()
     for doc in all_docs:
-        db.delete(doc)
-    db.commit()
+        await db.delete(doc)
+    await db.commit()
     vector_store.delete_all_docs()
     return all_docs
 
 
 @router.get("/")
-def list_documents(db: SessionDep):
-    return db.exec(select(Document)).all()
+async def list_documents(db: SessionDep):
+    result = await db.execute(select(Document))
+    return result.scalars().all()
 
 
 @router.post("/", response_model=UploadResponse)
@@ -42,26 +44,27 @@ async def upload_documents(db: SessionDep, files: List[UploadFile] = File(...)):
 
     valid_files_to_process = []
     for file in files:
+        filename = file.filename or "unnamed"
+
         if file.content_type != "application/pdf":
             failed_uploads.append(
-                {"filename": file.filename, "error": "Only PDF files are allowed."}
+                {"filename": filename, "error": "Only PDF files are allowed."}
             )
             continue
 
         upload_dir = Path(settings.DOC_DIR_PATH)
         upload_dir.mkdir(parents=True, exist_ok=True)
-        file_path = upload_dir / Path(file.filename)
+        file_path = upload_dir / filename
 
         # Check for duplicates
         # this query is ok for SQLite, we should query every
         # filename at once if we use a network DB
-        db_document = db.exec(
-            select(Document).where(Document.filename == file.filename)
-        ).first()
+        result = await db.execute(select(Document).where(Document.filename == filename))
+        db_document = result.scalar_one_or_none()
         if db_document:
             failed_uploads.append(
                 {
-                    "filename": file.filename,
+                    "filename": filename,
                     "error": "Document with this filename already exists.",
                 }
             )
@@ -74,16 +77,16 @@ async def upload_documents(db: SessionDep, files: List[UploadFile] = File(...)):
         finally:
             file.file.close()
 
-        db_document = Document(filename=file.filename)
+        db_document = Document(filename=filename)
         db.add(db_document)
         valid_files_to_process.append((db_document, file_path))
 
     if not valid_files_to_process:
         return UploadResponse(successful_uploads=[], failed_uploads=failed_uploads)
 
-    db.commit()
+    await db.commit()
     for doc, _ in valid_files_to_process:
-        db.refresh(doc)
+        await db.refresh(doc)
 
     # --- Asynchronous Embedding Calculation ---
     processing_tasks = []
@@ -103,7 +106,7 @@ async def upload_documents(db: SessionDep, files: List[UploadFile] = File(...)):
                 }
             )
             # Roll back the DB entry for the failed document
-            db.delete(db_document)
+            await db.delete(db_document)
         else:
             # Need to create the DocumentPublic object manually.
             successful_uploads.append(
@@ -114,7 +117,7 @@ async def upload_documents(db: SessionDep, files: List[UploadFile] = File(...)):
                 )
             )
 
-    db.commit()
+    await db.commit()
 
     return UploadResponse(
         successful_uploads=successful_uploads, failed_uploads=failed_uploads

@@ -50,9 +50,13 @@ class VectorStore:
 
     def similarity_search(self, *args, **kwargs) -> list[Document]:
         return self.store.similarity_search(*args, **kwargs)
-    
+
     def delete_all_docs(self) -> None:
         self.store.delete_collection()
 
 
-vector_store = VectorStore(embeddings=GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001", api_key=settings.GEMINI_API_KEY))
+vector_store = VectorStore(
+    embeddings=GoogleGenerativeAIEmbeddings(
+        model="models/gemini-embedding-001", api_key=settings.GEMINI_API_KEY
+    )
+)

@@ -1,7 +1,36 @@
+import uuid
 from datetime import datetime
-from typing import List, Optional, Dict
+from typing import TYPE_CHECKING, Dict, List, Optional
 
+from fastapi_users_db_sqlalchemy import (
+    SQLAlchemyBaseOAuthAccountTableUUID,
+    SQLAlchemyBaseUserTableUUID,
+)
+from sqlalchemy.orm import DeclarativeBase, Mapped, relationship
 from sqlmodel import TIMESTAMP, Column, Field, Relationship, SQLModel, text
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+# Share metadata between SQLAlchemy and SQLModel so foreign keys work
+SQLModel.metadata = Base.metadata
+
+
+class OAuthAccount(SQLAlchemyBaseOAuthAccountTableUUID, Base):
+    __tablename__ = "oauth_account"
+
+    if TYPE_CHECKING:
+        user: "User"
+
+
+class User(SQLAlchemyBaseUserTableUUID, Base):
+    __tablename__ = "user"
+
+    oauth_accounts: Mapped[list[OAuthAccount]] = relationship(
+        "OAuthAccount", lazy="joined"
+    )
 
 
 class InteractionDocument(SQLModel, table=True):
@@ -125,3 +154,29 @@ class MessageResponse(SQLModel):
 class UploadResponse(SQLModel):
     successful_uploads: List[DocumentPublic]
     failed_uploads: List[Dict[str, str]]
+
+
+# Conversation Models (for chat threads with checkpointer)
+class ConversationBase(SQLModel):
+    title: str = Field(default="New Conversation")
+
+
+class Conversation(ConversationBase, table=True):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
+    user_id: uuid.UUID = Field(foreign_key="user.id", index=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ConversationCreate(SQLModel):
+    title: str | None = None
+
+
+class ConversationPublic(ConversationBase):
+    id: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class ConversationList(SQLModel):
+    conversations: List[ConversationPublic]

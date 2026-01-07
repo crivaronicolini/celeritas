@@ -11,17 +11,30 @@ class Settings(BaseSettings):
         env_ignore_empty=False,
         extra="ignore",
     )
+
+    DEBUG: bool = False
+
+    PROJECT_NAME: str
     API_V1_STR: str = "/api/v1"
     SECRET_KEY: str = secrets.token_urlsafe(32)
     ENVIRONMENT: Literal["local", "staging", "production"] = "local"
-    PROJECT_NAME: str
+
     VECTOR_DB_PATH: str
     DOC_DIR_PATH: str
     DATABASE_URL: str
-    OPENAI_API_KEY: SecretStr | None
+
     LANGSMITH_API_KEY: SecretStr
     LANGSMITH_TRACING: bool = True
+
+    OPENAI_API_KEY: SecretStr | None
     GEMINI_API_KEY: SecretStr | None
+
+    # OAuth settings
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: SecretStr
+
+    # Frontend URL for CORS
+    FRONTEND_URL: str = "http://localhost:5173"
 
 
 settings = Settings()  # type: ignore
