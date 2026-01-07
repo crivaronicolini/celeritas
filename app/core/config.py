@@ -1,4 +1,3 @@
-import secrets
 from typing import Literal
 
 from pydantic import SecretStr
@@ -16,7 +15,7 @@ class Settings(BaseSettings):
 
     PROJECT_NAME: str
     API_V1_STR: str = "/api/v1"
-    SECRET_KEY: str = secrets.token_urlsafe(32)
+    SECRET_KEY: str
     ENVIRONMENT: Literal["local", "staging", "production"] = "local"
 
     VECTOR_DB_PATH: str
