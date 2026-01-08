@@ -13,9 +13,9 @@ export default function App() {
       <ThemeProvider>
         <AuthProvider>
           <Routes>
+            <Route path="/" element={<ChatPage />} />
+            <Route path="/chat/:conversationId?" element={<ChatPage />} />
             <Route element={<Layout />}>
-              <Route path="/" element={<ChatPage />} />
-              <Route path="/chat/:conversationId?" element={<ChatPage />} />
               <Route path="/documents" element={<DocumentsPage />} />
               <Route path="/analytics" element={<AnalyticsPage />} />
             </Route>
