@@ -77,8 +77,8 @@ async def message(
     used_documents = result.scalars().all()
 
     interaction = Interaction(
-        question=msg.question,
-        answer=agent_response.answer,
+        checkpoint_id=agent_response.checkpoint_id,
+        thread_id=conversation_id,
         response_time=response_time,
         documents=list(used_documents),
         timestamp=None,
@@ -91,6 +91,7 @@ async def message(
         response_time_ms=round(response_time * 1000, 2),
         documents_used=[d.filename for d in used_documents],
         interaction_id=str(interaction.id),
+        checkpoint_id=agent_response.checkpoint_id,
     )
 
     return MessageResponse(
@@ -100,7 +101,7 @@ async def message(
     )
 
 
-@router.put("/feedback")
+@router.post("/feedback")
 async def submit_feedback(
     feedback_req: FeedbackRequest, db: SessionDep, user: CurrentUser
 ):
@@ -111,14 +112,18 @@ async def submit_feedback(
     if not interaction:
         raise HTTPException(status_code=404, detail="Interaction not found.")
 
-    existing_feedback = interaction.feedback
+    # Query for existing feedback separately to avoid lazy-loading in async context
+    result = await db.execute(
+        select(Feedback).where(Feedback.interaction_id == feedback_req.interaction_id)
+    )
+    existing_feedback = result.scalar_one_or_none()
 
     if existing_feedback:
         existing_feedback.is_positive = feedback_req.is_positive
         db.add(existing_feedback)
         await db.commit()
         await db.refresh(existing_feedback)
-        return Response(status.HTTP_200_OK)
+        return Response(status_code=status.HTTP_200_OK)
     else:
         new_feedback = Feedback(
             interaction_id=feedback_req.interaction_id,
@@ -127,4 +132,4 @@ async def submit_feedback(
         db.add(new_feedback)
         await db.commit()
         await db.refresh(new_feedback)
-        return Response(status.HTTP_201_CREATED)
+        return Response(status_code=status.HTTP_201_CREATED)

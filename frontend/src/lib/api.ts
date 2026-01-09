@@ -125,16 +125,8 @@ export async function getAnalytics() {
   return fetchAPI<Analytics>('/analytics/');
 }
 
-export async function getRecentInteractions(limit = 10) {
-  return fetchAPI<Interaction[]>(`/analytics/interactions/recent?limit=${limit}`);
-}
-
 export async function getUnusedDocuments() {
   return fetchAPI<Document[]>('/analytics/documents/unused');
-}
-
-export async function getUnansweredPatterns() {
-  return fetchAPI<UnansweredPatterns>('/analytics/questions/unanswered-patterns');
 }
 
 // Types
@@ -160,6 +152,8 @@ export interface ConversationList {
 export interface Message {
   role: 'user' | 'assistant';
   content: string;
+  interactionId?: number | null;
+  feedback?: boolean | null;
 }
 
 export interface Document {
@@ -181,7 +175,6 @@ export interface UploadResponse {
 
 export interface Analytics {
   most_frequently_queried_documents: { filename: string; query_count: number }[];
-  most_often_asked_questions: { question: string; ask_count: number }[];
   weekly_queries_per_document: { filename: string; weekly_query_count: number }[];
   average_response_time_seconds: number;
   feedback_statistics: {
@@ -191,28 +184,4 @@ export interface Analytics {
     positive_feedback_percentage: number;
   };
   total_interactions: number;
-}
-
-export interface Interaction {
-  id: number;
-  question: string;
-  answer: string;
-  timestamp: string;
-  response_time: number;
-  used_documents: string[];
-}
-
-export interface UnansweredPatterns {
-  questions_without_documents: {
-    id: number;
-    question: string;
-    answer: string;
-    timestamp: string;
-  }[];
-  questions_with_negative_feedback: {
-    id: number;
-    question: string;
-    answer: string;
-    timestamp: string;
-  }[];
 }

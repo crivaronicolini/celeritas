@@ -31,6 +31,14 @@ class OutputSchema(BaseModel):
     )
 
 
+class AgentResponse(BaseModel):
+    """Response from the agent including checkpoint reference."""
+
+    answer: str
+    used_documents: list[str]
+    checkpoint_id: str
+
+
 class RAGAgent:
     def __init__(
         self,
@@ -113,7 +121,7 @@ class RAGAgent:
         )
         return "\n\n".join(serialized_docs)
 
-    async def ainvoke(self, question: str, thread_id: str) -> OutputSchema:
+    async def ainvoke(self, question: str, thread_id: str) -> AgentResponse:
         logger.debug("ainvoke called", thread_id=thread_id, question=question[:100])
         config = {"configurable": {"thread_id": thread_id}}
         logger.debug("agent config", config=config)
@@ -129,7 +137,17 @@ class RAGAgent:
             logger.debug(
                 "structured_response received", answer_length=len(structured.answer)
             )
-            return structured
+
+            # Get checkpoint_id from state
+            state = await self.agent.aget_state(config)
+            checkpoint_id = state.config["configurable"]["checkpoint_id"]
+            logger.debug("checkpoint_id retrieved", checkpoint_id=checkpoint_id)
+
+            return AgentResponse(
+                answer=structured.answer,
+                used_documents=structured.used_documents,
+                checkpoint_id=checkpoint_id,
+            )
         except KeyError as e:
             bind_contextvars(
                 error_type="KeyError", error_message="Missing key in agent response"

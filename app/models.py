@@ -101,13 +101,13 @@ class FeedbackRequest(SQLModel):
 
 
 # Interaction Models
-class InteractionBase(SQLModel):
-    question: str = Field(index=True)
-    answer: str
+class Interaction(SQLModel, table=True):
+    """Links feedback and document usage to a LangGraph checkpoint."""
 
-
-class Interaction(InteractionBase, table=True):
     id: int | None = Field(default=None, primary_key=True)
+    checkpoint_id: str = Field(index=True, unique=True)
+    thread_id: str = Field(index=True)
+    response_time: float
     timestamp: datetime | None = Field(
         sa_column=Column(
             TIMESTAMP(timezone=True),
@@ -115,7 +115,6 @@ class Interaction(InteractionBase, table=True):
             server_default=text("CURRENT_TIMESTAMP"),
         )
     )
-    response_time: float
 
     # Relationships
     documents: List["Document"] = Relationship(
@@ -124,17 +123,21 @@ class Interaction(InteractionBase, table=True):
     feedback: Optional["Feedback"] = Relationship(back_populates="interaction")
 
 
-class InteractionCreate(InteractionBase):
-    """Model for creating interactions with document references"""
+class InteractionCreate(SQLModel):
+    """Model for creating interactions with document references."""
 
+    checkpoint_id: str
+    thread_id: str
     response_time: float
     document_filenames: List[str] = Field(default_factory=list)
 
 
-class InteractionPublic(InteractionBase):
-    """Public model that includes used documents"""
+class InteractionPublic(SQLModel):
+    """Public model for API responses."""
 
     id: int
+    checkpoint_id: str
+    thread_id: str
     timestamp: datetime
     response_time: float
     used_documents: List[str] = Field(default_factory=list)

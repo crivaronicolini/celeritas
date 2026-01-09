@@ -1,6 +1,7 @@
 import uuid
 from typing import Annotated
 
+import structlog
 from fastapi import Depends, Request
 from fastapi_users import BaseUserManager, FastAPIUsers, UUIDIDMixin, schemas
 from fastapi_users.authentication import (
@@ -14,6 +15,8 @@ from structlog.contextvars import bind_contextvars
 from app.core.config import settings
 from app.db import get_user_db
 from app.models import User
+
+logger = structlog.stdlib.get_logger(__name__)
 
 
 class UserRead(schemas.BaseUser[uuid.UUID]):
@@ -34,7 +37,16 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
     reset_password_token_secret = settings.SECRET_KEY
     verification_token_secret = settings.SECRET_KEY
 
+    async def get(self, id: uuid.UUID) -> User | None:
+        user = await super().get(id)
+        if user is None:
+            logger.debug("user not found by id", user_id=str(id))
+        else:
+            logger.debug("user found by id", user_id=str(id), is_active=user.is_active)
+        return user
+
     async def on_after_register(self, user: User, request: Request | None = None):
+        logger.debug("user registered", user_id=str(user.id), email=user.email)
         bind_contextvars(user_id=str(user.id), auth_event="register")
 
     async def on_after_login(
@@ -43,6 +55,7 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
         request: Request | None = None,
         response=None,
     ):
+        logger.debug("user logged in", user_id=str(user.id), email=user.email)
         bind_contextvars(user_id=str(user.id), auth_event="login")
 
 

@@ -15,6 +15,8 @@ from app.models import (
     ConversationCreate,
     ConversationList,
     ConversationPublic,
+    Feedback,
+    Interaction,
 )
 
 logger = structlog.stdlib.get_logger(__name__)
@@ -118,6 +120,16 @@ async def get_conversation_messages(
 
     messages = await agent.get_history(conversation_id)
 
+    # Get all interactions with their feedback for this conversation
+    interactions_result = await db.execute(
+        select(Interaction, Feedback)
+        .outerjoin(Feedback, Interaction.id == Feedback.interaction_id)
+        .where(Interaction.thread_id == conversation_id)
+        .order_by(Interaction.timestamp)
+    )
+    interactions_with_feedback = list(interactions_result.all())
+    interaction_idx = 0
+
     result = []
     for msg in messages:
         if isinstance(msg, HumanMessage):
@@ -125,7 +137,23 @@ async def get_conversation_messages(
         elif isinstance(msg, AIMessage):
             content = _extract_ai_content(msg)
             if content:
-                result.append({"role": "assistant", "content": content})
+                # Match assistant messages with interactions by order
+                interaction_id = None
+                feedback = None
+                if interaction_idx < len(interactions_with_feedback):
+                    interaction, fb = interactions_with_feedback[interaction_idx]
+                    interaction_id = interaction.id
+                    if fb is not None:
+                        feedback = fb.is_positive
+                    interaction_idx += 1
+                result.append(
+                    {
+                        "role": "assistant",
+                        "content": content,
+                        "interactionId": interaction_id,
+                        "feedback": feedback,
+                    }
+                )
         elif isinstance(msg, ToolMessage):
             continue
 

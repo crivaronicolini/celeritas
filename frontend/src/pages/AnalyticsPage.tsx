@@ -4,36 +4,26 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Loader } from '@/components/ui/loader';
 import {
   getAnalytics,
-  getRecentInteractions,
   getUnusedDocuments,
-  getUnansweredPatterns,
   type Analytics,
-  type Interaction,
   type Document,
-  type UnansweredPatterns,
 } from '@/lib/api';
 
 export function AnalyticsPage() {
   const { user, loading: authLoading } = useAuth();
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
-  const [recentInteractions, setRecentInteractions] = useState<Interaction[]>([]);
   const [unusedDocuments, setUnusedDocuments] = useState<Document[]>([]);
-  const [unansweredPatterns, setUnansweredPatterns] = useState<UnansweredPatterns | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const loadAnalytics = useCallback(async () => {
     try {
-      const [analyticsData, interactions, unused, patterns] = await Promise.all([
+      const [analyticsData, unused] = await Promise.all([
         getAnalytics(),
-        getRecentInteractions(10),
         getUnusedDocuments(),
-        getUnansweredPatterns(),
       ]);
       setAnalytics(analyticsData);
-      setRecentInteractions(interactions);
       setUnusedDocuments(unused);
-      setUnansweredPatterns(patterns);
     } catch (err) {
       console.error('Failed to load analytics:', err);
       setError('Failed to load analytics. You may not have permission to view this page.');
@@ -157,43 +147,20 @@ export function AnalyticsPage() {
           </CardContent>
         </Card>
 
-        {/* Most Asked Questions */}
+        {/* Weekly Queries per Document */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg">Most Asked Questions</CardTitle>
+            <CardTitle className="text-lg">Weekly Document Usage</CardTitle>
           </CardHeader>
           <CardContent>
-            {analytics.most_often_asked_questions.length === 0 ? (
-              <p className="text-muted-foreground text-sm">No data yet</p>
+            {analytics.weekly_queries_per_document.length === 0 ? (
+              <p className="text-muted-foreground text-sm">No data this week</p>
             ) : (
               <div className="space-y-3">
-                {analytics.most_often_asked_questions.slice(0, 5).map((q, idx) => (
+                {analytics.weekly_queries_per_document.slice(0, 5).map((doc, idx) => (
                   <div key={idx} className="flex items-center justify-between">
-                    <span className="text-sm truncate flex-1 mr-4">{q.question}</span>
-                    <span className="text-sm font-medium">{q.ask_count}x</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Recent Interactions */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Recent Interactions</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {recentInteractions.length === 0 ? (
-              <p className="text-muted-foreground text-sm">No interactions yet</p>
-            ) : (
-              <div className="space-y-4">
-                {recentInteractions.slice(0, 5).map((interaction) => (
-                  <div key={interaction.id} className="border-b border-border pb-3 last:border-0">
-                    <p className="text-sm font-medium truncate">{interaction.question}</p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {new Date(interaction.timestamp).toLocaleString()} ({interaction.response_time.toFixed(2)}s)
-                    </p>
+                    <span className="text-sm truncate flex-1 mr-4">{doc.filename}</span>
+                    <span className="text-sm font-medium">{doc.weekly_query_count} queries</span>
                   </div>
                 ))}
               </div>
@@ -213,7 +180,6 @@ export function AnalyticsPage() {
               <div className="space-y-2">
                 {unusedDocuments.slice(0, 5).map((doc) => (
                   <div key={doc.id} className="flex items-center gap-2">
-                    <span className="text-xl">📄</span>
                     <span className="text-sm truncate">{doc.filename}</span>
                   </div>
                 ))}
@@ -226,46 +192,34 @@ export function AnalyticsPage() {
             )}
           </CardContent>
         </Card>
-      </div>
 
-      {/* Unanswered Patterns */}
-      {unansweredPatterns && (
-        <div className="mt-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Questions Needing Attention</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div>
-                  <h4 className="text-sm font-medium mb-3">Without Document Sources</h4>
-                  {unansweredPatterns.questions_without_documents.length === 0 ? (
-                    <p className="text-muted-foreground text-sm">None</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {unansweredPatterns.questions_without_documents.slice(0, 3).map((q) => (
-                        <p key={q.id} className="text-sm truncate">{q.question}</p>
-                      ))}
-                    </div>
-                  )}
+        {/* Feedback Breakdown */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Feedback Breakdown</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {analytics.feedback_statistics.total_feedback_count === 0 ? (
+              <p className="text-muted-foreground text-sm">No feedback yet</p>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">Positive</span>
+                  <span className="text-sm font-medium text-green-600">
+                    {analytics.feedback_statistics.positive_feedback_count}
+                  </span>
                 </div>
-                <div>
-                  <h4 className="text-sm font-medium mb-3">With Negative Feedback</h4>
-                  {unansweredPatterns.questions_with_negative_feedback.length === 0 ? (
-                    <p className="text-muted-foreground text-sm">None</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {unansweredPatterns.questions_with_negative_feedback.slice(0, 3).map((q) => (
-                        <p key={q.id} className="text-sm truncate">{q.question}</p>
-                      ))}
-                    </div>
-                  )}
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">Negative</span>
+                  <span className="text-sm font-medium text-red-600">
+                    {analytics.feedback_statistics.negative_feedback_count}
+                  </span>
                 </div>
               </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

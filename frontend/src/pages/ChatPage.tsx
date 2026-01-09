@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import {
   ChatContainerRoot,
@@ -69,6 +69,7 @@ interface ChatMessage extends ApiMessage {
   interactionId?: number | null
   sourceDocuments?: string[]
   isLoading?: boolean
+  feedback?: boolean | null
 }
 
 interface ConversationGroup {
@@ -255,8 +256,23 @@ function ChatContent({
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const { theme, toggleTheme } = useTheme()
-  const [feedbackState, setFeedbackState] = useState<Record<number, boolean | null>>({})
+  const [localFeedback, setLocalFeedback] = useState<Record<number, boolean>>({})
   const [copiedId, setCopiedId] = useState<number | null>(null)
+
+  // Compute feedback state: local overrides take precedence over server state
+  const feedbackState = useMemo(() => {
+    const state: Record<number, boolean | null> = {}
+    for (const msg of messages) {
+      if (msg.interactionId) {
+        if (msg.interactionId in localFeedback) {
+          state[msg.interactionId] = localFeedback[msg.interactionId]
+        } else if (msg.feedback !== undefined && msg.feedback !== null) {
+          state[msg.interactionId] = msg.feedback
+        }
+      }
+    }
+    return state
+  }, [messages, localFeedback])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -280,7 +296,7 @@ function ChatContent({
   }
 
   const handleFeedbackClick = (interactionId: number, isPositive: boolean) => {
-    setFeedbackState((prev) => ({ ...prev, [interactionId]: isPositive }))
+    setLocalFeedback((prev) => ({ ...prev, [interactionId]: isPositive }))
     onFeedback(interactionId, isPositive)
   }
 
